@@ -985,7 +985,7 @@ extern struct netlayer_mib global_mib;
 - **忘记对malloc返回值判空** → 空指针崩溃
 - **模块描述对象使用前未判空** → 目标模块未启动时崩溃
 - **结构体初始化使用C99指定初始化器** `.field = value` → 这个在内核态是允许的（GCC扩展），可以使用
-- **snprintf不检查剩余空间** → 缓冲区溢出
+- **snprintf不检查剩余空间** → 缓冲区溢出  
 
 ---
 
