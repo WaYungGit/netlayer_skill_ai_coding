@@ -420,8 +420,8 @@ struct netlayer_module_route_api_t
     Bool (*uninit_func)(void *param);
     NODE_ADDR_T (*get_nodeaddr_by_nodeid_func)(NODE_ID_T node_id);
     NODE_ID_T   (*get_nodeid_by_nodeaddr_func)(NODE_ADDR_T node_addr);
-    Bool   (*get_nexthop_by_dstid_func)(NODE_ID_T dst_id, NODE_ID_T *nexthop_id, U32 hop_cnt);
-    Bool (*get_nexthop_by_dstaddr_func)(NODE_ADDR_T dst_addr, NODE_ADDR_T *nexthop_addr, U32 hop_cnt);
+    Bool   (*get_nexthop_by_dstid_func)(NODE_ID_T dst_id, NODE_ID_T *nexthop_id, U8 *hop_cnt);
+    Bool (*get_nexthop_by_dstaddr_func)(NODE_ADDR_T dst_addr, NODE_ADDR_T *nexthop_addr, U8 *hop_cnt);
     Bool (*get_global_nodeid_func)(NODE_ID_T *node_list, unsigned int *node_cnt);
     Bool (*get_neigh_nodeid_func)(NODE_ID_T *node_list, unsigned int *node_cnt);
     netlayer_recv_handler_func lower_recv_handler_func;
