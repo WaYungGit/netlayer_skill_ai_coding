@@ -405,7 +405,37 @@ struct netlayer_module_desc *netlayer_module_get_by_type(U8 type);
 /* 根据模块类型获取已启动的模块描述对象，未启动返回NULL */
 ```
 
-### 13.4 模块声明宏
+### 13.4 模块描述对象结构体
+```c
+struct netlayer_module_desc
+{
+    const char *name;               // 模块名称
+    const char *ver_info;           // 模块版本
+    enum MODULE_TYPE_E type;        // 模块类型
+    const char *description;        // 模块描述信息
+    void *api_struct;               // 模块API接口结构体指针
+    struct netlayer_module_route_api_t *route_api;
+    struct netlayer_module_data_api_t *data_api;
+    struct netlayer_module_addr_api_t *addr_api;
+    struct netlayer_module_sorter_api_t *sorter_api;
+    struct netlayer_module_hetnet_api_t *hetnet_api;
+    struct netlayer_module_kpi_api_t *kpi_api;
+    struct netlayer_module_pktable_api_t *pktable_api;
+    struct netlayer_module_topo_api_t *topo_api;
+    void (*event_cb_func)(struct module_event_msg_t *event_msg); // 事件通知函数
+    U8 status;                      // 模块运行状态
+};
+```
+
+跨模块调用示例：
+```c
+struct netlayer_module_desc *route_desc = netlayer_module_get_by_type(ROUTE_MODULE);
+if (route_desc && route_desc->route_api && route_desc->route_api->get_nexthop_by_dstid_func) {
+    /* 通过 route_api 指针调用路由模块接口 */
+}
+```
+
+### 13.5 模块声明宏
 ```c
 NETLAYER_MODULE_DECLARE(tag, "name", "version", type, "description", api_struct, event_cb_func)
 ```
@@ -579,6 +609,8 @@ Bool  hashmap_del(struct hashmap_t *hashmap, HASH_KEY_T key);
 int   hashmap_show(struct hashmap_t *hashmap, const char *root_name, char *show_buf, hashmap_print_func print, void *param);
 int   hashmap_show_by_slot(struct hashmap_t *hashmap, const char *root_name, char *show_buf, hashmap_print_func print, void *param);
 ```
+
+**注意：** hashmap 内部使用 `ATOMIC_LOCK_T` 实现槽级别和全局链表的并发保护，该锁由 hashmap 内部自动管理，使用者无需手动操作 `ATOMIC_LOCK_T`。如果模块自身需要对 hashmap 的复合操作（如"查找后插入"）做原子保护，应使用 `netlayer_api_mutex_*` 互斥锁接口在模块层面加锁。
 
 ---
 

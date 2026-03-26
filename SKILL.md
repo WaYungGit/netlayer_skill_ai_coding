@@ -151,9 +151,10 @@ static Bool example_init(void *param)
 
 **选型原则：**
 
-- 需要按 key 查找、判重、快速增删的场景 → **必须用 hashmap**（如：邻居表按 node_id 查找、地址表按地址查找、拓扑表按源节点查找）
-- 仅需顺序遍历、数量极少（<16）的场景 → 可用链表或小数组
+- 条目数量 ≥16 或需要按 key 查找、判重、快速增删的场景 → **必须用 hashmap**（如：邻居表按 node_id 查找、地址表按地址查找、拓扑表按源节点查找）
+- 仅需顺序遍历、数量极少（<16）且无需按 key 查找的场景 → 可用链表或小数组
 - 需要同时支持 key 查找和顺序遍历的场景 → hashmap + 链表组合（hashmap 负责查找，链表负责遍历，条目同时挂在两条链上）
+- 条目数量不确定但可能增长的场景 → 优先选 hashmap，避免后期重构
 
 **关于哈希冲突：** 不必担忧。框架 hashmap 采用链地址法处理槽位冲突——相同槽位的多个条目通过链表串联，查找时先定位槽位再遍历槽内短链。只要 key 计算合理（使用地址内容、节点ID等生成），实际槽位冲突率极低，性能接近理论 O(1)。槽位数量（slot_size）建议设为预期最大条目数的 1~2 倍。
 
@@ -453,88 +454,88 @@ void netlayer_<module>_core_uninit(void);
 | pktable | `struct netlayer_module_pktable_api_t` | `PKTABLE_MODULE` |
 | 拓扑管理 | `struct netlayer_module_topo_api_t` | `TOPO_MODULE` |
 
-**api.h 示例（以排序器模块为例）：**
+**api.h 示例（以滑动窗口排序器模块 `sorter_window` 为例）：**
 
 ```c
-/* sorter/api.h */
-#ifndef _NETLAYER_SORTER_API_H_
-#define _NETLAYER_SORTER_API_H_
+/* sorter_window/api.h */
+#ifndef _NETLAYER_SORTER_WINDOW_API_H_
+#define _NETLAYER_SORTER_WINDOW_API_H_
 
 #include "base/module.h"
 
 /* 声明模块API接口结构体全局变量 */
-extern struct netlayer_module_sorter_api_t netlayer_module_sorter_api;
+extern struct netlayer_module_sorter_api_t netlayer_module_sorter_window_api;
 
 /* 声明模块事件回调函数（若无事件处理则声明为NULL，不需要此行） */
-/* extern void netlayer_sorter_event_cb_func(struct module_event_msg_t *event_msg); */
+/* extern void netlayer_sorter_window_event_cb_func(struct module_event_msg_t *event_msg); */
 
-#endif /* _NETLAYER_SORTER_API_H_ */
+#endif /* _NETLAYER_SORTER_WINDOW_API_H_ */
 ```
 
 **api.c 示例：**
 
 ```c
-/* sorter/api.c */
+/* sorter_window/api.c */
 #include "api.h"
 #include "core.h"
 #include "base/api.h"
 
 /* 前置声明模块内部实现函数 */
-static Bool netlayer_sorter_init(void *param);
-static Bool netlayer_sorter_uninit(void *param);
-static void *netlayer_sorter_alloc(const char *name, U32 timeout_detect_ms,
+static Bool netlayer_sorter_window_init(void *param);
+static Bool netlayer_sorter_window_uninit(void *param);
+static void *netlayer_sorter_window_alloc(const char *name, U32 timeout_detect_ms,
     U32 timeout_ms, U32 window_size, U32 max_seqno_num);
-static Bool netlayer_sorter_destroy(void *sorter);
-static Bool netlayer_sorter_packet_process(void *sorter, U32 seqno_num,
+static Bool netlayer_sorter_window_destroy(void *sorter);
+static Bool netlayer_sorter_window_packet_process(void *sorter, U32 seqno_num,
     Bool (*cb)(U32 seqno_num, void *param), void *param);
-static Bool netlayer_sorter_stats_get(void *sorter, U64 *total_recv,
+static Bool netlayer_sorter_window_stats_get(void *sorter, U64 *total_recv,
     U64 *total_sorted, U64 *timeout, U64 *out_of_order,
     U64 *duplicate, U64 *expired, U64 *big_detected, U64 *restart_detected);
 
 /* 定义并填充模块API接口结构体 */
-struct netlayer_module_sorter_api_t netlayer_module_sorter_api = {
-    .init_func = netlayer_sorter_init,
-    .uninit_func = netlayer_sorter_uninit,
-    .sorter_alloc_func = netlayer_sorter_alloc,
-    .sorter_destroy_func = netlayer_sorter_destroy,
-    .sorter_packet_proccess_func = netlayer_sorter_packet_process,
-    .sorter_stats_get_func = netlayer_sorter_stats_get,
+struct netlayer_module_sorter_api_t netlayer_module_sorter_window_api = {
+    .init_func = netlayer_sorter_window_init,
+    .uninit_func = netlayer_sorter_window_uninit,
+    .sorter_alloc_func = netlayer_sorter_window_alloc,
+    .sorter_destroy_func = netlayer_sorter_window_destroy,
+    .sorter_packet_proccess_func = netlayer_sorter_window_packet_process,
+    .sorter_stats_get_func = netlayer_sorter_window_stats_get,
 };
 
 /* ========== init/uninit 实现 ========== */
-static Bool netlayer_sorter_init(void *param)
+static Bool netlayer_sorter_window_init(void *param)
 {
     Bool ret = TRUE;
-    netlayer_api_log_info_print("sorter module init\n");
+    netlayer_api_log_info_print("sorter_window module init\n");
     /* 注册参数控制命令 */
     /* 创建资源（内存池、定时器、消息队列等） */
     return ret;
 }
 
-static Bool netlayer_sorter_uninit(void *param)
+static Bool netlayer_sorter_window_uninit(void *param)
 {
     Bool ret = TRUE;
-    netlayer_api_log_info_print("sorter module uninit\n");
+    netlayer_api_log_info_print("sorter_window module uninit\n");
     /* 销毁资源 */
     return ret;
 }
 
 /* ========== 业务接口实现 ========== */
-static void *netlayer_sorter_alloc(const char *name, U32 timeout_detect_ms,
+static void *netlayer_sorter_window_alloc(const char *name, U32 timeout_detect_ms,
     U32 timeout_ms, U32 window_size, U32 max_seqno_num)
 {
-    struct netlayer_sorter_t *sorter = NULL;
-    sorter = netlayer_api_mem_malloc(sizeof(struct netlayer_sorter_t));
+    struct netlayer_sorter_window_t *sorter = NULL;
+    sorter = netlayer_api_mem_malloc(sizeof(struct netlayer_sorter_window_t));
     if (!sorter) {
         netlayer_api_log_error_print("malloc sorter failed\n");
         return NULL;
     }
-    netlayer_rt_memset(sorter, 0, sizeof(struct netlayer_sorter_t));
+    netlayer_rt_memset(sorter, 0, sizeof(struct netlayer_sorter_window_t));
     /* 初始化排序器字段 */
     return (void *)sorter;
 }
 
-static Bool netlayer_sorter_destroy(void *sorter)
+static Bool netlayer_sorter_window_destroy(void *sorter)
 {
     if (!sorter) {
         return FALSE;
@@ -643,10 +644,14 @@ void netlayer_mymodule_event_cb_func(struct module_event_msg_t *event_msg)
 /* 获取路由模块描述对象 */
 struct netlayer_module_desc *route_desc = NULL;
 NODE_ID_T next_hop = 0;
+Bool found = FALSE;
 
 route_desc = netlayer_module_get_by_type(ROUTE_MODULE);
 if (route_desc && route_desc->route_api && route_desc->route_api->get_nexthop_by_dstid_func) {
-    next_hop = route_desc->route_api->get_nexthop_by_dstid_func(dst_node_id);
+    found = route_desc->route_api->get_nexthop_by_dstid_func(dst_node_id, &next_hop, NULL);
+    if (found) {
+        netlayer_api_log_info_print("next hop for node %d is %d\n", dst_node_id, next_hop);
+    }
 }
 ```
 
@@ -659,7 +664,7 @@ if (route_desc && route_desc->route_api && route_desc->route_api->get_nexthop_by
 ### test.h 模板
 
 ```c
-/* Copyright (C) 2024-now *******公司名******* */
+/* Copyright (C) *******公司名******* */
 #ifndef _NETLAYER_<MODULE>_TEST_H_
 #define _NETLAYER_<MODULE>_TEST_H_
 
@@ -672,10 +677,12 @@ int netlayer_<module>_test_cases_run(int argc, char **argv, char *buf, int size)
 ### test.c 结构模板
 
 ```c
-/* Copyright (C) 2024-now *******公司名******* */
+/* Copyright (C) *******公司名******* */
+#include "<module_name>/test.h"
 #include "<module_name>/api.h"
-#include "base/api.h"
 #include "<module_name>/core.h"
+#include "base/api.h"
+#include "base/def.h"
 #include "base/trace.h"
 #include "base/coverage.h"
 
@@ -777,7 +784,7 @@ int netlayer_<module>_test_cases_get(char *buf, int size)
         return -1;
     }
 
-    for (i = 0; i < sizeof(test_list) / sizeof(struct netlayer_<module>_test_t); i++) {
+    for (i = 0; i < NETLAYER_ARRAYSIZE(test_list); i++) {
         len += snprintf(buf + len, size - len, "%15s %15d %15d %15d %s\n",
             test_list[i].name, test_list[i].run_count,
             test_list[i].pass_count, test_list[i].failed_count,
@@ -797,9 +804,9 @@ int netlayer_<module>_test_cases_run(int argc, char **argv, char *buf, int size)
 
     name = argv[0];
 
-    for (i = 0; i < sizeof(test_list) / sizeof(struct netlayer_<module>_test_t); i++) {
-        if (strcmp(test_list[i].name, name) == 0
-            || strcmp("all", name) == 0) {
+    for (i = 0; i < NETLAYER_ARRAYSIZE(test_list); i++) {
+        if (netlayer_rt_strcmp(test_list[i].name, name) == 0
+            || netlayer_rt_strcmp("all", name) == 0) {
             test_list[i].result = test_list[i].test_func(NULL);
             result = test_list[i].result;
             test_list[i].run_count++;
@@ -812,7 +819,7 @@ int netlayer_<module>_test_cases_run(int argc, char **argv, char *buf, int size)
                 len += snprintf(buf + len, size - len,
                     "Test case: '%s' failed.\n", test_list[i].name);
             }
-            if (strcmp("all", name) != 0) {
+            if (netlayer_rt_strcmp("all", name) != 0) {
                 break;
             }
         }
@@ -843,119 +850,9 @@ int netlayer_<module>_test_cases_run(int argc, char **argv, char *buf, int size)
 
 ---
 
-## Base框架API接口速查
+## Base框架API接口参考
 
-以下为常用接口分类速查，完整接口签名和参数说明请查阅 `references/api_reference.md`。
-
-### 日志接口
-```c
-#include "base/api.h"
-netlayer_api_log_info_print(fmt, args...)           /* 信息日志 */
-netlayer_api_log_debug_print(module_id, fmt, args...)  /* 调试日志（需先注册模块） */
-netlayer_api_log_error_print(fmt, args...)           /* 错误日志 */
-netlayer_api_log_debug_add_module(name, flag, desc, &id) /* 注册调试日志模块 */
-```
-
-### 内存接口
-```c
-void *netlayer_api_mem_malloc(unsigned int size);     /* 堆内存申请 */
-void  netlayer_api_mem_free(void *mem);               /* 堆内存释放 */
-int   netlayer_api_memp_create(name, ele_num, ele_size); /* 内存池创建 */
-void *netlayer_api_memp_malloc(int id);               /* 内存池申请 */
-void  netlayer_api_memp_free(int id, void *mem);      /* 内存池释放 */
-Bool  netlayer_api_memp_destroy(int id);              /* 内存池销毁 */
-Bool  netlayer_api_memp_stats(id, &total, &used, &max, &err); /* 内存池统计 */
-```
-
-### 同步原语
-```c
-int   netlayer_api_mutex_create(void);                /* 互斥锁创建 */
-Bool  netlayer_api_mutex_lock(int id);                /* 加锁 */
-Bool  netlayer_api_mutex_unlock(int id);              /* 解锁 */
-Bool  netlayer_api_mutex_destroy(int id);             /* 销毁 */
-
-int   netlayer_api_sem_create(name, cnt);             /* 信号量创建 */
-Bool  netlayer_api_sem_signal(int id);                /* 信号发送 */
-Bool  netlayer_api_sem_wait(int id, timeout_ms);      /* 信号等待 */
-Bool  netlayer_api_sem_destroy(int id);               /* 信号量销毁 */
-```
-
-### 消息队列
-```c
-int   netlayer_api_msgqueue_create(name, size);       /* 创建 */
-Bool  netlayer_api_msgqueue_send(int id, void *msg);  /* 发送（msg不可指向栈） */
-Bool  netlayer_api_msgqueue_recv(id, &msg, timeout_ms); /* 接收 */
-Bool  netlayer_api_msgqueue_destroy(int id);          /* 销毁 */
-```
-
-### 定时器
-```c
-int   netlayer_api_timer_create(name, work_func, param, circle_flag, interval_ms);
-Bool  netlayer_api_timer_destroy(int id);
-Bool  netlayer_api_timer_setinterval(int id, interval_ms);
-```
-
-### 时间
-```c
-U32   netlayer_api_time_now(void);     /* 毫秒级时间 */
-U32   netlayer_api_time_us_now(void);  /* 微秒级时间 */
-void  netlayer_api_msleep(U32 ms);     /* 毫秒级休眠 */
-```
-
-### 数据收发
-```c
-Bool  netlayer_api_send_netpkt_lower(IF_ID_T if_id, struct netpkt *pkt);  /* 向低层发送 */
-Bool  netlayer_api_send_netpkt_higher(IF_ID_T if_id, struct netpkt *pkt); /* 向高层发送 */
-Bool  netlayer_api_send_ctl_msg(if_id, data, data_len, &attr);           /* 控制消息发送 */
-Bool  netlayer_api_recv_ctl_msg_register(dst_module_id, recv_lower, recv_higher); /* 控制消息接收注册 */
-Bool  netlayer_api_recv_pdu_func_register(name, recv_func, type, default_flag);   /* PDU接收注册 */
-Bool  netlayer_api_recv_eth_func_register(name, recv_func, eth_proto, default_flag); /* 以太网帧接收注册 */
-```
-
-### 参数控制
-```c
-Bool  netlayer_api_attr_add_v2(attr_name, short_name, validvalue, get_func, set_func, desc, desc_zh);
-```
-
-### netpkt操作
-```c
-#include "base/netpkt.h"
-struct netpkt *netpkt_alloc(if_id, orig_data, orig_data_len, free_func, ref_orig, type);
-void  netpkt_free(struct netpkt *pkt);
-void  netpkt_ref(struct netpkt *pkt);
-```
-
-### 数据结构
-```c
-#include "base/list.h"       /* 双向链表 */
-#include "base/hashmap.h"    /* 哈希表 */
-#include "base/def.h"        /* 工具函数 */
-```
-
-### 基础工具函数
-```c
-#include "base/def.h"
-U16   netlayer_htons(U16 x);    U16 netlayer_ntohs(U16 x);
-U32   netlayer_htonl(U32 x);    U32 netlayer_ntohl(U32 x);
-Bool  netlayer_is_my_nodeid(NODE_ID_T id);
-Bool  netlayer_is_my_nodeaddr(NODE_ADDR_T addr);
-int   netlayer_rt_strlen(const char *str);
-char *netlayer_rt_strcpy(char *dst, const char *src);
-int   netlayer_rt_strcmp(const char *s1, const char *s2);
-void *netlayer_rt_memcpy(void *dst, const void *src, int cnt);
-void *netlayer_rt_memset(void *dst, int value, int cnt);
-int   netlayer_rt_memcmp(const void *m1, const void *m2, int cnt);
-```
-
-### 基础MIB信息
-```c
-#include "base/mib.h"
-extern struct netlayer_mib global_mib;
-/* global_mib.node_id   - 本节点ID */
-/* global_mib.node_addr - 本节点地址 */
-/* global_mib.dev_type  - 设备类型 */
-/* global_mib.macaddr   - MAC地址 */
-```
+所有框架API接口的完整签名、参数说明和使用示例请查阅 `references/api_reference.md`，包括：日志、堆内存/内存池、消息队列、同步锁（互斥锁/信号量）、定时器、时间、数据收发、参数控制、netpkt操作、双向链表、哈希表、工具函数（字节序/字符串/内存/MAC/IP操作）、MIB信息等。
 
 ---
 
@@ -985,12 +882,12 @@ extern struct netlayer_mib global_mib;
 - **忘记对malloc返回值判空** → 空指针崩溃
 - **模块描述对象使用前未判空** → 目标模块未启动时崩溃
 - **结构体初始化使用C99指定初始化器** `.field = value` → 这个在内核态是允许的（GCC扩展），可以使用
-- **snprintf不检查剩余空间** → 缓冲区溢出  
+- **snprintf不检查剩余空间** → 缓冲区溢出
 
 ---
 
 ## 完整示例：排序器模块参考
 
-查阅项目中提供的排序器模块代码（`sorter/`目录下的api.h、api.c、core.h、core.c、test.h、test.c），
+查阅项目中提供的排序器模块代码（`sorter_window/`目录下的api.h、api.c、core.h、core.c、test.h、test.c），
 它是一个符合所有规范的标准实现范例，展示了完整的模块生命周期管理、API结构体填充、
 参数控制注册、统计信息管理和测试用例编写模式。
