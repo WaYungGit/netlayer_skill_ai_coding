@@ -20,7 +20,7 @@ description: >
 
 1. **禁止直接使用操作系统原生API**，必须使用Base框架提供的`netlayer_api_*`系列封装接口
 2. **禁止使用malloc/free**，必须使用`netlayer_api_mem_malloc`/`netlayer_api_mem_free`
-3. **禁止使用pthread等线程库**，必须使用框架提供的互斥锁、信号量、定时器接口
+3. **禁止使用pthread等线程库**，必须使用框架提供的互斥锁、信号量、自旋锁、原子操作、定时器接口
 4. **禁止使用printf**，必须使用`netlayer_api_log_info_print`等日志接口
 5. **禁止使用string.h中的strlen/strcmp/memcpy等**，必须使用`netlayer_rt_strlen`/`netlayer_rt_strcmp`/`netlayer_rt_memcpy`等框架封装接口
 
@@ -76,6 +76,8 @@ for (i = 0; i < count; i++) { ... }
 - 节点ID类型使用 `NODE_ID_T`，节点地址类型使用 `NODE_ADDR_T`
 - 接口ID类型使用 `IF_ID_T`
 - 哈希键类型使用 `HASH_KEY_T`
+- 原子对象句柄类型使用 `NETLAYER_ATOMIC_T`
+- 自旋锁对象句柄类型使用 `NETLAYER_SPINLOCK_T`
 
 ### 注释规范
 - 文件头部使用版权声明注释块
@@ -161,6 +163,19 @@ static Bool example_init(void *param)
 **hashmap 使用模式示例：**
 
 ```c
+static int neigh_item_dump(void **val, void *param)
+{
+    struct my_entry_t *e = NULL;
+
+    if (!val || !*val) {
+        return 0;
+    }
+
+    e = (struct my_entry_t *)(*val);
+    /* ... 对条目做只读处理 ... */
+    return 0;
+}
+
 /* 创建 */
 struct hashmap_t *table = hashmap_new("NEIGH_TABLE", 512);
 
@@ -174,16 +189,8 @@ struct my_entry_t *found = (struct my_entry_t *)hashmap_find(table, key);
 /* 删除 */
 hashmap_del(table, key);
 
-/* 遍历所有条目（通过 hashmap 内部链表） */
-struct hashmap_item_t *item = NULL;
-struct my_entry_t *e = NULL;
-list_for_each_entry(item, &table->head, hashmap_list) {
-    if (!item || !item->live_flag || !item->val) {
-        continue;
-    }
-    e = (struct my_entry_t *)item->val;
-    /* ... */
-}
+/* 顺序遍历：优先使用 hashmap_lookup，由 hashmap 内部持锁遍历 */
+hashmap_lookup(table, neigh_item_dump, NULL);
 
 /* 销毁 */
 hashmap_destroy(table);
