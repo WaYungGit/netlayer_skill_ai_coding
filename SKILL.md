@@ -24,6 +24,15 @@ description: >
 4. **禁止使用printf**，必须使用`netlayer_api_log_info_print`等日志接口
 5. **禁止使用string.h中的strlen/strcmp/memcpy等**，必须使用`netlayer_rt_strlen`/`netlayer_rt_strcmp`/`netlayer_rt_memcpy`等框架封装接口
 
+### 基于当前Base API的补充要求
+
+- 原子计数器、状态位统一使用 `netlayer_api_atomic_*`，句柄类型为 `NETLAYER_ATOMIC_T`
+- 极短临界区的忙等保护统一使用 `netlayer_api_spinlock_*`，句柄类型为 `NETLAYER_SPINLOCK_T`
+- `NETLAYER_ATOMIC_T`、`mutex`、`msgqueue` 一样都是平台无关的不透明句柄，功能模块只保存和传递句柄，不直接访问平台内部对象
+- `hashmap` 内部已经用 spinlock 保护基础增删查遍历，但如果模块要做“查找后插入”“遍历时联动修改其他状态”这类复合操作，仍然必须在模块层自己加 `netlayer_api_mutex_*` 互斥锁
+- `hashmap` 的重复添加、逻辑删除、销毁释放语义都不是普通容器语义；写代码前务必结合 `references/hashmap_usage_spec.md` 一起看，避免误判所有权和生命周期
+- 发送接口 `netlayer_api_send_netpkt_lower` / `netlayer_api_send_netpkt_higher` 的返回值必须检查，返回 `TRUE` 才表示底层平台发送成功
+
 ---
 
 ## C语言编码规范（内核态兼容）
@@ -151,6 +160,12 @@ static Bool example_init(void *param)
 
 模块内部需要存储和检索数据集合时，**优先使用框架提供的 hashmap**（`base/hashmap.h`），而非纯链表或静态数组线性扫描。hashmap 通过哈希函数将 key 映射到槽位，查找时间复杂度为 O(1)，远优于链表的 O(n) 遍历。
 
+关于文档分工，建议这样使用：
+
+- 本章节负责说明什么时候该选 `hashmap`、key 怎么设计、模块层并发策略怎么定
+- `references/hashmap_usage_spec.md` 负责说明 `hashmap_add` / `hashmap_del` / `hashmap_destroy` / `hashmap_lookup` 的特殊行为和推荐写法
+- `references/api_reference.md` 负责提供完整函数签名和 Base 框架接口速查
+
 **选型原则：**
 
 - 条目数量 ≥16 或需要按 key 查找、判重、快速增删的场景 → **必须用 hashmap**（如：邻居表按 node_id 查找、地址表按地址查找、拓扑表按源节点查找）
@@ -195,6 +210,10 @@ hashmap_lookup(table, neigh_item_dump, NULL);
 /* 销毁 */
 hashmap_destroy(table);
 ```
+
+**关键提醒：** `hashmap_add` 在 key 已存在时会释放新传入的 val，并返回旧 val；`hashmap_del` 只是逻辑删除，不会立即释放条目内存。完整行为说明和反例请查阅 `references/hashmap_usage_spec.md`。
+
+**注意：** 不要把直接遍历 `table->head` 或 `slot[i].head` 当作通用写法。若确实需要访问内部链表，只允许在模块自有互斥锁保护下或模块停机态使用。
 
 **禁止的低效模式：**
 
@@ -860,6 +879,8 @@ int netlayer_<module>_test_cases_run(int argc, char **argv, char *buf, int size)
 ## Base框架API接口参考
 
 所有框架API接口的完整签名、参数说明和使用示例请查阅 `references/api_reference.md`，包括：日志、堆内存/内存池、消息队列、同步锁（互斥锁/信号量）、定时器、时间、数据收发、参数控制、netpkt操作、双向链表、哈希表、工具函数（字节序/字符串/内存/MAC/IP操作）、MIB信息等。
+
+其中 `hashmap` 建议和 `references/hashmap_usage_spec.md` 一起看：`api_reference.md` 负责接口速查，`hashmap_usage_spec.md` 负责补充真实行为、内存管理和推荐使用模式。
 
 ---
 

@@ -2,6 +2,12 @@
 
 本文档包含所有Base框架对外提供的API接口详细说明，是功能模块开发的权威接口参考。
 
+## 如何查阅
+
+- 需要确认“函数签名是什么、头文件怎么包含、同类 API 有哪些”时，优先查本文档
+- 需要确认“功能模块该怎么设计、如何选数据结构、有哪些开发约束”时，查 `../SKILL.md`
+- 需要编写 `hashmap` 增删改查逻辑时，本文档应和 `hashmap_usage_spec.md` 配合阅读；前者负责速查，后者负责补充真实行为和典型写法
+
 ---
 
 ## 1. 头文件包含约定
@@ -607,7 +613,18 @@ list_for_each_entry(pos, head, member)
 
 ## 16. 哈希表（base/hashmap.h）
 
+### 16.1 使用定位
+
+- 本章提供 `hashmap` 的结构体定义、函数签名和关键语义速查。
+- 模块开发时，建议先阅读 `../SKILL.md` 中“数据结构选型规范”，明确何时应使用 `hashmap`、如何规划 key 和容量。
+- 写具体增删改查代码前，再结合 `hashmap_usage_spec.md` 阅读 `hashmap_add` / `hashmap_del` / `hashmap_destroy` 的特殊行为。不要把它当成“新值直接覆盖旧值”的普通容器。
+
+### 16.2 关键类型与结构体
+
 ```c
+#define HASHMAP_MIN_SLOT_SIZE_LIMIT 260
+#define HASHMAP_MAX_SLOT_SIZE_LIMIT 65535
+
 typedef HASH_KEY_T (*hash_calc_func)(U8 *, U16);
 typedef NETLAYER_SPINLOCK_T ATOMIC_LOCK_T;
 typedef int (*hashmap_print_func)(void **val, char *buf, void *param);
@@ -616,31 +633,36 @@ typedef int (*hashmap_lookup_func)(void **val, void *param);
 struct hashmap_item_t {
     HASH_KEY_T   key;                    // 用户数据计算的hash值
     void*        val;                    // 存储用户数据
-    U32      slot_no;                    // 所属槽编号
-    Bool     live_flag;                  // 用户数据存活状态
+    U32          slot_no;                // 所属槽编号
+    Bool         live_flag;              // 用户数据存活状态
     struct list_head slot_list;          // 构建槽内链表
     struct list_head hashmap_list;       // 构建hashmap链表，用于快速遍历hashmap数据
 };
 
 struct hashmap_slot_t {
-    U32 slot_no;                  // 槽编号
-    U32 slot_len;                 // 槽下面存储的数据数量长度
-    struct list_head head;        // 槽数据头
-    ATOMIC_LOCK_T list_lock;      // 槽操作锁
+    U32 slot_no;                         // 槽编号
+    U32 slot_len;                        // 槽下面存储的数据数量长度
+    struct list_head head;               // 槽数据头
+    ATOMIC_LOCK_T list_lock;             // 槽操作锁
 };
 
 struct hashmap_t {
     char         hashmap_name[HASHMAP_NAME_LEN];      // hashmap名
     U32          slot_size;                           // hashmap槽数目
-    struct hashmap_slot_t *slot;                      // 数组数据，alloc分配size，用于高效查找
-    U32      total_cnt;                               // 存储的数据总数目
-    U32      live_cnt;                                // 用户数据存活状态正常的总数目
+    struct hashmap_slot_t *slot;                      // 槽数组，用于高效查找
+    U32          total_cnt;                           // 存储的数据总数目
+    U32          live_cnt;                            // live_flag == 1 的条目数
     struct list_head head;                            // hashmap链表头
     ATOMIC_LOCK_T list_lock;                          // hashmap链表操作锁
     hash_calc_func hash;                              // hash计算函数
     hashmap_print_func hashmap_print;
     U32 min_use_slot_no;
 };
+```
+
+### 16.3 核心接口
+
+```c
 struct hashmap_t *hashmap_new(const char *name, U32 slot_size);
 Bool  hashmap_destroy(struct hashmap_t *hashmap);
 void *hashmap_get_by_index(struct hashmap_t *hashmap, U32 index);
@@ -652,12 +674,23 @@ int   hashmap_show_by_slot(struct hashmap_t *hashmap, const char *root_name, cha
 Bool  hashmap_lookup(struct hashmap_t *hashmap, hashmap_lookup_func item_deal, void *param);
 ```
 
-**注意：**
-- `ATOMIC_LOCK_T` 当前本质上是 `NETLAYER_SPINLOCK_T`
-- hashmap 内部已经对基础增删查和 `hashmap_lookup` 做了锁保护，使用者无需手动操作 `ATOMIC_LOCK_T`
-- `hashmap_lookup` 的回调返回 `-1` 时会提前停止遍历
-- 若模块自身需要“查找后插入”“遍历同时更新其他对象”等复合操作，仍应使用 `netlayer_api_mutex_*` 在模块层面加锁
-- 不建议在并发路径里直接遍历 `hashmap->head` 或 `slot[i].head`，优先使用 `hashmap_lookup`
+### 16.4 关键语义速查
+
+- `hashmap_new`：创建表对象。`slot_size` 小于 `HASHMAP_MIN_SLOT_SIZE_LIMIT` 时会被提升到最小值；大于 `HASHMAP_MAX_SLOT_SIZE_LIMIT` 时创建失败。
+- `hashmap_find`：只返回 `live_flag == 1` 的条目值；逻辑删除后的条目对 `find` 不可见。
+- `hashmap_get_by_index`：按遍历顺序返回第 N 个有效条目，只统计 `live_flag == 1` 且 `val != NULL` 的条目。
+- `hashmap_add`：若 key 不存在，则插入并返回传入的 `val`；若 key 已存在，则释放新传入的 `val`，返回旧条目的 `val`。如果旧条目此前已被逻辑删除，还会恢复其 `live_flag` 并增加 `live_cnt`。
+- `hashmap_del`：逻辑删除，不释放条目内存，也不移出内部链表；只会把 `live_flag` 置 0，并减少 `live_cnt`。
+- `hashmap_lookup`：仅遍历 `live_flag == 1` 且 `val != NULL` 的条目；回调返回 `-1` 时提前停止遍历。
+- `hashmap_destroy`：释放整个 `hashmap`、所有内部条目以及条目中的 `val`，包括已经被逻辑删除的条目。
+
+### 16.5 使用约束
+
+- `ATOMIC_LOCK_T` 当前本质上是 `NETLAYER_SPINLOCK_T`。
+- `hashmap` 内部已经对基础增删查和 `hashmap_lookup` 做了锁保护，使用者无需直接操作 `ATOMIC_LOCK_T`。
+- 若模块自身需要“查找后插入”“遍历同时联动更新其他对象”等复合操作，仍应使用 `netlayer_api_mutex_*` 在模块层面加锁。
+- 不建议在并发路径里直接遍历 `hashmap->head` 或 `slot[i].head`。内部链表可能保留 `live_flag == 0` 的条目，优先使用 `hashmap_find` / `hashmap_lookup` 等公开接口。
+- 推荐采用“`find` 命中则原地修改，未命中再申请内存并 `add`”的 `find-first` 模式。完整示例和反例见 `hashmap_usage_spec.md`。
 
 ---
 
